@@ -42,4 +42,4 @@ waitForPort = 5000
 [agent]
 stack = "MOCKUP_JS"
 mockupState = "FULLSTACK"
-integrations = ["google-docs:1.0.0"]
+integrations = ["google-docs:1.0.0", "google-mail:1.0.0"]

@@ -1,18 +1,21 @@
-import { sql } from "drizzle-orm";
-import { pgTable, text, varchar } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export const users = pgTable("users", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
+export const parseDocRequestSchema = z.object({
+  docUrl: z.string().url(),
 });
 
-export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
-  password: true,
+export const songInputSchema = z.object({
+  title: z.string(),
+  youtubeUrl: z.string().nullable(),
+  targetKey: z.string().optional(),
 });
 
-export type InsertUser = z.infer<typeof insertUserSchema>;
-export type User = typeof users.$inferSelect;
+export const processRequestSchema = z.object({
+  songs: z.array(songInputSchema).min(1),
+  emailTo: z.string().email(),
+  weekLabel: z.string().optional(),
+});
+
+export type ParseDocRequest = z.infer<typeof parseDocRequestSchema>;
+export type SongInput = z.infer<typeof songInputSchema>;
+export type ProcessRequest = z.infer<typeof processRequestSchema>;
