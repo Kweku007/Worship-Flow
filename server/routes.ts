@@ -3,7 +3,9 @@ import { createServer, type Server } from "http";
 import { extractDocumentId, parseSetlistFromDoc } from "./googleDocs";
 import { sendEmailWithAttachments } from "./gmail";
 import { processYoutubeUrl, checkVocalExtractorHealth, type ProcessingResult } from "./vocalExtractor";
+import { parseDocRequestSchema, processRequestSchema } from "@shared/schema";
 import { log } from "./index";
+import { fromError } from "zod-validation-error";
 
 interface ProcessingJob {
   id: string;
@@ -33,18 +35,20 @@ export async function registerRoutes(
 
   app.post('/api/parse-doc', async (req, res) => {
     try {
-      const { docUrl } = req.body;
-      if (!docUrl) {
-        return res.status(400).json({ message: 'Google Doc URL is required' });
+      const parsed = parseDocRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: fromError(parsed.error).toString() });
       }
 
-      const documentId = extractDocumentId(docUrl);
+      const documentId = extractDocumentId(parsed.data.docUrl);
       const songs = await parseSetlistFromDoc(documentId);
 
       res.json({ songs, documentId });
     } catch (err: any) {
       log(`Error parsing doc: ${err.message}`, 'google-docs');
-      res.status(500).json({ message: err.message || 'Failed to parse Google Doc' });
+      const isUserError = err.message?.includes('Could not extract') || err.message?.includes('not found');
+      const status = isUserError ? 400 : 500;
+      res.status(status).json({ message: err.message || 'Failed to parse Google Doc' });
     }
   });
 
@@ -55,21 +59,19 @@ export async function registerRoutes(
 
   app.post('/api/process', async (req, res) => {
     try {
-      const { songs, emailTo, weekLabel } = req.body;
+      const parsed = processRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: fromError(parsed.error).toString() });
+      }
 
-      if (!songs || !Array.isArray(songs) || songs.length === 0) {
-        return res.status(400).json({ message: 'At least one song is required' });
-      }
-      if (!emailTo) {
-        return res.status(400).json({ message: 'Email address is required' });
-      }
+      const { songs: songInputs, emailTo, weekLabel } = parsed.data;
 
       const jobId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
       const job: ProcessingJob = {
         id: jobId,
         status: 'pending',
-        songs: songs.map((s: any) => ({
+        songs: songInputs.map((s) => ({
           title: s.title,
           youtubeUrl: s.youtubeUrl || null,
           targetKey: s.targetKey,

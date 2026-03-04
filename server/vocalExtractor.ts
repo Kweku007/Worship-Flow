@@ -56,7 +56,17 @@ export async function processYoutubeUrl(
       };
     }
 
-    const json = await res.json();
+    let json: any;
+    try {
+      json = await res.json();
+    } catch {
+      const text = await res.text().catch(() => 'unknown');
+      return {
+        songTitle,
+        status: 'error',
+        error: `Vocal Extractor returned unexpected non-JSON response: ${text.slice(0, 200)}`,
+      };
+    }
 
     if (json.download_url) {
       const downloadRes = await fetch(
@@ -113,7 +123,12 @@ async function pollForResult(
       const res = await fetch(`${VOCAL_EXTRACTOR_BASE}/api/status/${taskId}`);
       if (!res.ok) continue;
 
-      const json = await res.json();
+      let json: any;
+      try {
+        json = await res.json();
+      } catch {
+        continue;
+      }
 
       if (json.status === 'completed' || json.state === 'completed') {
         if (json.download_url) {

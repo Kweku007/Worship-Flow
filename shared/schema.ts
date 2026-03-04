@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const parseDocRequestSchema = z.object({
-  docUrl: z.string().url(),
+  docUrl: z.string().min(1, "Google Doc URL is required"),
 });
 
 export const songInputSchema = z.object({

@@ -51,6 +51,7 @@ export async function getUncachableGoogleDocsClient() {
 export interface ParsedSong {
   title: string;
   youtubeUrl: string | null;
+  isPlaylist: boolean;
   weekLabel: string;
 }
 
@@ -103,6 +104,7 @@ export async function parseSetlistFromDoc(documentId: string): Promise<ParsedSon
         songs.push({
           title,
           youtubeUrl: finalUrl,
+          isPlaylist: finalUrl ? isPlaylistUrl(finalUrl) : false,
           weekLabel: currentWeek,
         });
       }
@@ -125,11 +127,22 @@ function looksLikeWeekHeader(text: string): boolean {
   return /week|sunday|service|date|january|february|march|april|may|june|july|august|september|october|november|december|\d{1,2}[\/-]\d{1,2}/i.test(text);
 }
 
+const SKIP_ENTRIES = [
+  'to be posted', 'tbd', 'tba', 'n/a', 'na', 'none', 'pending',
+  'worship', 'praise', 'call to worship', 'ministration',
+  'offering', 'prayer', 'sermon', 'benediction', 'announcements',
+];
+
+function isPlaylistUrl(url: string): boolean {
+  return /playlist\?list=|\/playlist\//.test(url);
+}
+
 function cleanSongTitle(text: string): string {
-  let cleaned = text.replace(/(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)[^\s]*/gi, '');
+  let cleaned = text.replace(/(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/playlist\?|youtube\.com\/clip\/)[^\s]*/gi, '');
   cleaned = cleaned.replace(/[-–—•*·]\s*/, '');
   cleaned = cleaned.trim();
   if (cleaned.length < 2) return '';
+  if (SKIP_ENTRIES.includes(cleaned.toLowerCase())) return '';
   if (looksLikeWeekHeader(cleaned) && !/[a-z]/i.test(cleaned.replace(/\d+/g, '').replace(/[\s\-\/]/g, ''))) return '';
   return cleaned;
 }

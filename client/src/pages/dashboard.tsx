@@ -22,6 +22,7 @@ const MUSICAL_KEYS = [
 interface ParsedSong {
   title: string;
   youtubeUrl: string | null;
+  isPlaylist: boolean;
   weekLabel: string;
 }
 
@@ -286,16 +287,23 @@ export default function Dashboard() {
                       </p>
                       <div className="flex items-center gap-2 mt-1">
                         {song.youtubeUrl ? (
-                          <a
-                            href={song.youtubeUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs text-primary/70 hover:text-primary flex items-center gap-1"
-                            data-testid={`link-youtube-${i}`}
-                          >
-                            <ExternalLink className="w-3 h-3" />
-                            YouTube
-                          </a>
+                          <div className="flex items-center gap-2">
+                            <a
+                              href={song.youtubeUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs text-primary/70 hover:text-primary flex items-center gap-1"
+                              data-testid={`link-youtube-${i}`}
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              YouTube
+                            </a>
+                            {song.isPlaylist && (
+                              <Badge variant="secondary" className="text-xs">
+                                Playlist
+                              </Badge>
+                            )}
+                          </div>
                         ) : (
                           <Badge variant="secondary" className="text-xs" data-testid={`badge-no-link-${i}`}>
                             Title only
