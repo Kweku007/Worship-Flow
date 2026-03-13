@@ -56,10 +56,16 @@ export async function runValidation(trigger: 'scheduled' | 'manual' = 'manual'):
     }
 
     result.sections = validateSections(weekData);
-    result.emailsSent = await sendValidationEmails(result.sections, targetDateStr);
 
     const complete = result.sections.filter((s) => s.status === 'complete').length;
     const total = result.sections.length;
+
+    if (complete === total && trigger === 'scheduled') {
+      log(`All ${total} sections complete for ${targetDateStr} - skipping emails`, 'scheduler');
+    } else {
+      result.emailsSent = await sendValidationEmails(result.sections, targetDateStr);
+    }
+
     log(`Validation complete: ${complete}/${total} sections ready for ${targetDateStr}`, 'scheduler');
   } catch (err: any) {
     result.error = err.message || 'Unknown error during validation';
@@ -101,13 +107,19 @@ export function getNextScheduledRun(): { nextRunAt: string; targetSunday: string
   const now = new Date();
   const ct = toCtComponents(now);
 
-  let daysUntilTuesday = (2 - ct.weekday + 7) % 7;
-
+  let daysAhead = 0;
   let nextHourCT = 9;
 
-  if (daysUntilTuesday === 0) {
+  if (ct.weekday === 0) {
+    daysAhead = 1;
+    nextHourCT = 9;
+  } else if (ct.weekday >= 1 && ct.weekday <= 6) {
     if (ct.hour >= 17) {
-      daysUntilTuesday = 7;
+      if (ct.weekday === 6) {
+        daysAhead = 2;
+      } else {
+        daysAhead = 1;
+      }
       nextHourCT = 9;
     } else if (ct.hour >= 9) {
       nextHourCT = 17;
@@ -116,7 +128,7 @@ export function getNextScheduledRun(): { nextRunAt: string; targetSunday: string
     }
   }
 
-  const nextDay = ct.day + daysUntilTuesday;
+  const nextDay = ct.day + daysAhead;
   const nextRunUtc = ctComponentsToUtc(ct.year, ct.month, nextDay, nextHourCT);
 
   const target = getTargetSunday(nextRunUtc);
@@ -128,8 +140,8 @@ export function getNextScheduledRun(): { nextRunAt: string; targetSunday: string
 }
 
 export function startScheduler() {
-  cron.schedule(`0 ${CT_9AM_UTC},${CT_5PM_UTC} * * 2`, async () => {
-    log('Scheduled validation triggered (Tuesday cron)', 'scheduler');
+  cron.schedule(`0 ${CT_9AM_UTC},${CT_5PM_UTC} * * 1-6`, async () => {
+    log('Scheduled validation triggered (Mon-Sat cron)', 'scheduler');
     try {
       await runValidation('scheduled');
     } catch (err: any) {
@@ -137,5 +149,5 @@ export function startScheduler() {
     }
   });
 
-  log('Scheduler started: Tuesdays at 9:00 AM and 5:00 PM CT', 'scheduler');
+  log('Scheduler started: Mon-Sat at 9:00 AM and 5:00 PM CT (stops when all sections complete)', 'scheduler');
 }

@@ -199,7 +199,7 @@ export default function Dashboard() {
                 </div>
                 <Badge variant="outline" className="text-xs">
                   <Clock className="w-3 h-3 mr-1" />
-                  Every Tuesday 9 AM & 5 PM
+                  Mon-Sat 9 AM & 5 PM
                 </Badge>
               </div>
             </CardContent>
