@@ -117,9 +117,10 @@ export default function Dashboard() {
     refetchInterval: 30000,
   });
 
-  const { data: preview, isLoading: previewLoading } = useQuery<PreviewData>({
+  const { data: preview, isLoading: previewLoading, isFetching: previewFetching } = useQuery<PreviewData>({
     queryKey: ['preview'],
     queryFn: () => fetch('/api/preview').then((r) => r.json()),
+    refetchInterval: 60000,
   });
 
   const runNowMutation = useMutation({
@@ -208,10 +209,21 @@ export default function Dashboard() {
         {preview && preview.weekData && (
           <Card className="border-border/50">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <RefreshCw className="w-4 h-4 text-primary" />
-                Current Setlist Preview — {formatDate(preview.targetSunday)}
-              </CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <RefreshCw className="w-4 h-4 text-primary" />
+                  Current Setlist Preview — {formatDate(preview.targetSunday)}
+                </CardTitle>
+                <Button
+                  data-testid="button-refresh-preview"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => queryClient.invalidateQueries({ queryKey: ['preview'] })}
+                  disabled={previewFetching}
+                >
+                  <RefreshCw className={`w-4 h-4 ${previewFetching ? 'animate-spin' : ''}`} />
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="grid gap-4 md:grid-cols-3">
