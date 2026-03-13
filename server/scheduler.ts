@@ -81,40 +81,48 @@ export function getRunHistory(): ValidationResult[] {
   return runHistory;
 }
 
-function nowInCT(): { day: number; hour: number } {
-  const now = new Date();
-  const ctMs = now.getTime() - CT_OFFSET_HOURS * 60 * 60 * 1000;
+function toCtComponents(utcDate: Date): { year: number; month: number; day: number; weekday: number; hour: number } {
+  const ctMs = utcDate.getTime() - CT_OFFSET_HOURS * 60 * 60 * 1000;
   const ctDate = new Date(ctMs);
-  return { day: ctDate.getUTCDay(), hour: ctDate.getUTCHours() };
+  return {
+    year: ctDate.getUTCFullYear(),
+    month: ctDate.getUTCMonth(),
+    day: ctDate.getUTCDate(),
+    weekday: ctDate.getUTCDay(),
+    hour: ctDate.getUTCHours(),
+  };
+}
+
+function ctComponentsToUtc(year: number, month: number, day: number, hour: number): Date {
+  return new Date(Date.UTC(year, month, day, hour + CT_OFFSET_HOURS, 0, 0, 0));
 }
 
 export function getNextScheduledRun(): { nextRunAt: string; targetSunday: string } {
   const now = new Date();
-  const ct = nowInCT();
+  const ct = toCtComponents(now);
 
-  let daysUntilTuesday = (2 - ct.day + 7) % 7;
+  let daysUntilTuesday = (2 - ct.weekday + 7) % 7;
+
+  let nextHourCT = 9;
 
   if (daysUntilTuesday === 0) {
     if (ct.hour >= 17) {
       daysUntilTuesday = 7;
+      nextHourCT = 9;
+    } else if (ct.hour >= 9) {
+      nextHourCT = 17;
+    } else {
+      nextHourCT = 9;
     }
   }
 
-  const nextTuesday = new Date(now);
-  nextTuesday.setUTCDate(nextTuesday.getUTCDate() + daysUntilTuesday);
+  const nextDay = ct.day + daysUntilTuesday;
+  const nextRunUtc = ctComponentsToUtc(ct.year, ct.month, nextDay, nextHourCT);
 
-  if (daysUntilTuesday === 0 && ct.hour < 9) {
-    nextTuesday.setUTCHours(CT_9AM_UTC, 0, 0, 0);
-  } else if (daysUntilTuesday === 0 && ct.hour < 17) {
-    nextTuesday.setUTCHours(CT_5PM_UTC, 0, 0, 0);
-  } else {
-    nextTuesday.setUTCHours(CT_9AM_UTC, 0, 0, 0);
-  }
-
-  const target = getTargetSunday(nextTuesday);
+  const target = getTargetSunday(nextRunUtc);
 
   return {
-    nextRunAt: nextTuesday.toISOString(),
+    nextRunAt: nextRunUtc.toISOString(),
     targetSunday: target.toISOString().split('T')[0],
   };
 }
