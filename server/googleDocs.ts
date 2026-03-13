@@ -221,7 +221,10 @@ export async function parseSetlistForSunday(documentId: string, targetSunday: Da
 
   for (const p of weekParagraphs) {
     const sectionName = matchesSectionName(p.text);
-    if (sectionName && !p.youtubeUrl) {
+    const isExactSectionName = sectionName && SECTION_NAMES.some(
+      (n) => p.text.trim().toLowerCase() === n.toLowerCase()
+    );
+    if (sectionName && (isExactSectionName || !p.youtubeUrl)) {
       if (currentSection) sections.push(currentSection);
       currentSection = { name: sectionName, leaderEmail: null, songs: [] };
       foundLeaderForCurrentSection = false;
@@ -257,6 +260,7 @@ export async function parseSetlistForSunday(documentId: string, targetSunday: Da
     sections,
   };
 }
+
 
 export async function getAllSundays(documentId: string): Promise<{ date: string; header: string }[]> {
   const docs = await getUncachableGoogleDocsClient();
