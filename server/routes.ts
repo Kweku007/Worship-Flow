@@ -37,21 +37,25 @@ export async function registerRoutes(
       const weekData = await parseSetlistForSunday(DOCUMENT_ID, targetSunday);
       const targetSundayStr = targetSunday.toISOString().split('T')[0];
 
-      if (!weekData) {
-        const defaultWeekData: WeekData = {
-          sundayDate: targetSundayStr,
-          rawHeader: '',
-          sections: SECTION_NAMES.map((name) => ({
-            name,
-            leaderEmail: null,
-            songs: [],
-          })),
-        };
-        res.json({ targetSunday: targetSundayStr, weekData: defaultWeekData });
-        return;
-      }
+      const finalWeekData: WeekData = weekData
+        ? {
+            ...weekData,
+            sections: SECTION_NAMES.map((name) => {
+              const existing = weekData.sections.find((s) => s.name === name);
+              return existing || { name, leaderEmail: null, songs: [] };
+            }),
+          }
+        : {
+            sundayDate: targetSundayStr,
+            rawHeader: '',
+            sections: SECTION_NAMES.map((name) => ({
+              name,
+              leaderEmail: null,
+              songs: [],
+            })),
+          };
 
-      res.json({ targetSunday: targetSundayStr, weekData });
+      res.json({ targetSunday: targetSundayStr, weekData: finalWeekData });
     } catch (err: any) {
       log(`Preview error: ${err.message}`, 'routes');
       res.status(500).json({ message: err.message || 'Failed to preview setlist' });
