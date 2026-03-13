@@ -58,10 +58,12 @@ export async function sendEmail(
 ): Promise<void> {
   const gmail = await getUncachableGmailClient();
 
+  const encodedSubject = `=?UTF-8?B?${Buffer.from(subject, 'utf-8').toString('base64')}?=`;
+
   const nl = '\r\n';
   let message = '';
   message += `To: ${to}${nl}`;
-  message += `Subject: ${subject}${nl}`;
+  message += `Subject: ${encodedSubject}${nl}`;
   message += `MIME-Version: 1.0${nl}`;
   message += `Content-Type: text/html; charset="UTF-8"${nl}${nl}`;
   message += bodyHtml;

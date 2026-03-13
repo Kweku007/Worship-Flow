@@ -69,7 +69,7 @@ export async function sendValidationEmails(
       try {
         await sendEmail(
           ADMIN_EMAIL,
-          `Action Needed: Missing Leader for ${v.sectionName} — ${formattedDate}`,
+          `Action Needed: Missing Leader for ${v.sectionName} - ${formattedDate}`,
           buildAdminEmail(v.sectionName, formattedDate)
         );
         emailsSent.push({
@@ -89,7 +89,7 @@ export async function sendValidationEmails(
       try {
         await sendEmail(
           v.leaderEmail,
-          `Reminder: Please Update Your ${v.sectionName} Setlist — ${formattedDate}`,
+          `Reminder: Please Update Your ${v.sectionName} Setlist - ${formattedDate}`,
           buildLeaderEmail(v, formattedDate)
         );
         emailsSent.push({

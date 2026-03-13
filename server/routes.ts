@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import type { Server } from "http";
-import { DOCUMENT_ID } from "@shared/schema";
+import { DOCUMENT_ID, SECTION_NAMES } from "@shared/schema";
+import type { WeekData } from "@shared/schema";
 import { parseSetlistForSunday, getAllSundays } from "./googleDocs";
 import { runValidation, getRunHistory, getNextScheduledRun, getTargetSunday } from "./scheduler";
 import { log } from "./index";
@@ -34,10 +35,23 @@ export async function registerRoutes(
     try {
       const targetSunday = getTargetSunday();
       const weekData = await parseSetlistForSunday(DOCUMENT_ID, targetSunday);
-      res.json({
-        targetSunday: targetSunday.toISOString().split('T')[0],
-        weekData,
-      });
+      const targetSundayStr = targetSunday.toISOString().split('T')[0];
+
+      if (!weekData) {
+        const defaultWeekData: WeekData = {
+          sundayDate: targetSundayStr,
+          rawHeader: '',
+          sections: SECTION_NAMES.map((name) => ({
+            name,
+            leaderEmail: null,
+            songs: [],
+          })),
+        };
+        res.json({ targetSunday: targetSundayStr, weekData: defaultWeekData });
+        return;
+      }
+
+      res.json({ targetSunday: targetSundayStr, weekData });
     } catch (err: any) {
       log(`Preview error: ${err.message}`, 'routes');
       res.status(500).json({ message: err.message || 'Failed to preview setlist' });
