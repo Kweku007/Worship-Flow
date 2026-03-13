@@ -226,17 +226,20 @@ export default function Dashboard() {
               </div>
             </CardHeader>
             <CardContent>
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-4 grid-cols-1 md:grid-cols-3">
                 {preview.weekData.sections.map((section) => (
                   <div
                     key={section.name}
-                    className="p-4 rounded-lg border border-border/50 bg-muted/20"
+                    className="p-4 rounded-lg border border-border/50 bg-muted/20 overflow-hidden"
                     data-testid={`preview-section-${section.name.replace(/\s+/g, '-').toLowerCase()}`}
                   >
                     <h3 className="font-medium text-sm mb-2">{section.name}</h3>
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-3">
-                      <User className="w-3 h-3" />
-                      <span data-testid={`text-leader-${section.name.replace(/\s+/g, '-').toLowerCase()}`}>
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-3 min-w-0">
+                      <User className="w-3 h-3 shrink-0" />
+                      <span
+                        className="break-all"
+                        data-testid={`text-leader-${section.name.replace(/\s+/g, '-').toLowerCase()}`}
+                      >
                         {section.leaderEmail || 'No leader assigned'}
                       </span>
                     </div>
@@ -249,7 +252,7 @@ export default function Dashboard() {
                             ) : (
                               <XCircle className="w-3 h-3 text-amber-500 mt-0.5 shrink-0" />
                             )}
-                            <span className="truncate">{song.title}</span>
+                            <span className="break-words">{song.title}</span>
                           </li>
                         ))}
                       </ul>
