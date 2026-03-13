@@ -1,11 +1,13 @@
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import {
   Music, CheckCircle2, XCircle, AlertTriangle, Clock,
-  RefreshCw, Mail, Calendar, Play, User, Link2, Loader2
+  RefreshCw, Mail, Calendar, Play, User, Link2, Loader2, Lock
 } from 'lucide-react';
 
 interface SectionValidation {
@@ -105,6 +107,8 @@ function formatDateTime(dateStr: string) {
 export default function Dashboard() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [showPinInput, setShowPinInput] = useState(false);
+  const [pin, setPin] = useState('');
 
   const { data: schedule } = useQuery<ScheduleInfo>({
     queryKey: ['schedule'],
@@ -124,8 +128,12 @@ export default function Dashboard() {
   });
 
   const runNowMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch('/api/validate', { method: 'POST' });
+    mutationFn: async (enteredPin: string) => {
+      const res = await fetch('/api/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: enteredPin }),
+      });
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.message);
@@ -135,6 +143,8 @@ export default function Dashboard() {
     onSuccess: (result: ValidationResult) => {
       queryClient.invalidateQueries({ queryKey: ['history'] });
       queryClient.invalidateQueries({ queryKey: ['preview'] });
+      setShowPinInput(false);
+      setPin('');
       const complete = result.sections.filter((s) => s.status === 'complete').length;
       toast({
         title: 'Validation complete',
@@ -165,19 +175,51 @@ export default function Dashboard() {
               <p className="text-xs text-muted-foreground">Setlist validation & reminders</p>
             </div>
           </div>
-          <Button
-            data-testid="button-run-now"
-            onClick={() => runNowMutation.mutate()}
-            disabled={runNowMutation.isPending}
-            size="sm"
-          >
-            {runNowMutation.isPending ? (
-              <Loader2 className="w-4 h-4 animate-spin mr-2" />
-            ) : (
-              <Play className="w-4 h-4 mr-2" />
-            )}
-            Run Now
-          </Button>
+          {showPinInput ? (
+            <div className="flex items-center gap-2">
+              <Input
+                data-testid="input-pin"
+                type="password"
+                placeholder="Enter PIN"
+                value={pin}
+                onChange={(e) => setPin(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && pin) runNowMutation.mutate(pin);
+                }}
+                className="w-28 h-8 text-sm"
+                autoFocus
+              />
+              <Button
+                data-testid="button-submit-pin"
+                onClick={() => runNowMutation.mutate(pin)}
+                disabled={runNowMutation.isPending || !pin}
+                size="sm"
+              >
+                {runNowMutation.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Play className="w-4 h-4" />
+                )}
+              </Button>
+              <Button
+                data-testid="button-cancel-pin"
+                variant="ghost"
+                size="sm"
+                onClick={() => { setShowPinInput(false); setPin(''); }}
+              >
+                <XCircle className="w-4 h-4" />
+              </Button>
+            </div>
+          ) : (
+            <Button
+              data-testid="button-run-now"
+              onClick={() => setShowPinInput(true)}
+              size="sm"
+            >
+              <Lock className="w-4 h-4 mr-2" />
+              Run Now
+            </Button>
+          )}
         </div>
       </header>
 

@@ -11,7 +11,13 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
 
-  app.post('/api/validate', async (_req, res) => {
+  app.post('/api/validate', async (req, res) => {
+    const pin = req.body?.pin;
+    const adminPin = process.env.ADMIN_PIN;
+    if (adminPin && pin !== adminPin) {
+      res.status(401).json({ message: 'Invalid PIN' });
+      return;
+    }
     try {
       const result = await runValidation('manual');
       res.json(result);
