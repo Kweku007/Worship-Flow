@@ -5,11 +5,15 @@ import { parseSetlistForSunday } from './googleDocs';
 import { validateSections, sendValidationEmails } from './validator';
 import { log } from './index';
 
+const CT_OFFSET_HOURS = 5;
+const CT_9AM_UTC = 9 + CT_OFFSET_HOURS;
+const CT_5PM_UTC = 17 + CT_OFFSET_HOURS;
+
 const runHistory: ValidationResult[] = [];
 const MAX_HISTORY = 50;
 
 export function getTargetSunday(fromDate: Date = new Date()): Date {
-  const day = fromDate.getDay();
+  const day = fromDate.getUTCDay();
   let daysUntilNextSunday: number;
 
   if (day === 0) {
@@ -20,8 +24,8 @@ export function getTargetSunday(fromDate: Date = new Date()): Date {
   }
 
   const target = new Date(fromDate);
-  target.setDate(target.getDate() + daysUntilNextSunday);
-  target.setHours(0, 0, 0, 0);
+  target.setUTCDate(target.getUTCDate() + daysUntilNextSunday);
+  target.setUTCHours(0, 0, 0, 0);
   return target;
 }
 
@@ -77,26 +81,34 @@ export function getRunHistory(): ValidationResult[] {
   return runHistory;
 }
 
+function nowInCT(): { day: number; hour: number } {
+  const now = new Date();
+  const ctMs = now.getTime() - CT_OFFSET_HOURS * 60 * 60 * 1000;
+  const ctDate = new Date(ctMs);
+  return { day: ctDate.getUTCDay(), hour: ctDate.getUTCHours() };
+}
+
 export function getNextScheduledRun(): { nextRunAt: string; targetSunday: string } {
   const now = new Date();
-  const day = now.getDay();
-  let daysUntilTuesday = (2 - day + 7) % 7;
+  const ct = nowInCT();
+
+  let daysUntilTuesday = (2 - ct.day + 7) % 7;
+
   if (daysUntilTuesday === 0) {
-    const hour = now.getHours();
-    if (hour >= 17) {
+    if (ct.hour >= 17) {
       daysUntilTuesday = 7;
     }
   }
 
   const nextTuesday = new Date(now);
-  nextTuesday.setDate(nextTuesday.getDate() + daysUntilTuesday);
+  nextTuesday.setUTCDate(nextTuesday.getUTCDate() + daysUntilTuesday);
 
-  if (daysUntilTuesday === 0 && now.getHours() < 9) {
-    nextTuesday.setHours(9, 0, 0, 0);
-  } else if (daysUntilTuesday === 0 && now.getHours() < 17) {
-    nextTuesday.setHours(17, 0, 0, 0);
+  if (daysUntilTuesday === 0 && ct.hour < 9) {
+    nextTuesday.setUTCHours(CT_9AM_UTC, 0, 0, 0);
+  } else if (daysUntilTuesday === 0 && ct.hour < 17) {
+    nextTuesday.setUTCHours(CT_5PM_UTC, 0, 0, 0);
   } else {
-    nextTuesday.setHours(9, 0, 0, 0);
+    nextTuesday.setUTCHours(CT_9AM_UTC, 0, 0, 0);
   }
 
   const target = getTargetSunday(nextTuesday);
@@ -108,7 +120,7 @@ export function getNextScheduledRun(): { nextRunAt: string; targetSunday: string
 }
 
 export function startScheduler() {
-  cron.schedule('0 9,17 * * 2', async () => {
+  cron.schedule(`0 ${CT_9AM_UTC},${CT_5PM_UTC} * * 2`, async () => {
     log('Scheduled validation triggered (Tuesday cron)', 'scheduler');
     try {
       await runValidation('scheduled');
@@ -117,5 +129,5 @@ export function startScheduler() {
     }
   });
 
-  log('Scheduler started: Tuesdays at 9:00 AM and 5:00 PM', 'scheduler');
+  log('Scheduler started: Tuesdays at 9:00 AM and 5:00 PM CT', 'scheduler');
 }
