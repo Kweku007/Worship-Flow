@@ -1,5 +1,6 @@
-// Google Docs Integration (Replit Connector)
 import { google } from 'googleapis';
+import type { SectionName, SongEntry, SectionData, WeekData } from '@shared/schema';
+import { SECTION_NAMES } from '@shared/schema';
 
 let connectionSettings: any;
 
@@ -37,7 +38,7 @@ async function getAccessToken() {
   return accessToken;
 }
 
-export async function getUncachableGoogleDocsClient() {
+async function getUncachableGoogleDocsClient() {
   const accessToken = await getAccessToken();
 
   const oauth2Client = new google.auth.OAuth2();
@@ -48,27 +49,105 @@ export async function getUncachableGoogleDocsClient() {
   return google.docs({ version: 'v1', auth: oauth2Client });
 }
 
-export interface ParsedSong {
-  title: string;
+function isYoutubeUrl(url: string): boolean {
+  return /youtube\.com|youtu\.be/i.test(url);
+}
+
+function extractYoutubeUrl(text: string): string | null {
+  const match = text.match(/(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)[^\s]+/i);
+  return match ? match[0] : null;
+}
+
+function isEmailAddress(text: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text.trim());
+}
+
+function parseDateFromHeader(header: string): Date | null {
+  const cleaned = header.replace(/\s+/g, ' ').trim();
+
+  const monthNames = [
+    'january', 'february', 'march', 'april', 'may', 'june',
+    'july', 'august', 'september', 'october', 'november', 'december'
+  ];
+
+  const monthPattern = monthNames.join('|');
+  const dateRegex = new RegExp(`(${monthPattern})\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:[,\\s]+(\\d{4}))?`, 'i');
+  const match = cleaned.match(dateRegex);
+
+  if (match) {
+    const monthIndex = monthNames.indexOf(match[1].toLowerCase());
+    const day = parseInt(match[2], 10);
+    const year = match[3] ? parseInt(match[3], 10) : new Date().getFullYear();
+    const date = new Date(year, monthIndex, day);
+    if (!isNaN(date.getTime())) return date;
+  }
+
+  const slashMatch = cleaned.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  if (slashMatch) {
+    const month = parseInt(slashMatch[1], 10) - 1;
+    const day = parseInt(slashMatch[2], 10);
+    let year = parseInt(slashMatch[3], 10);
+    if (year < 100) year += 2000;
+    const date = new Date(year, month, day);
+    if (!isNaN(date.getTime())) return date;
+  }
+
+  return null;
+}
+
+function isSundayDate(header: string): boolean {
+  const date = parseDateFromHeader(header);
+  if (!date) return false;
+  return date.getDay() === 0;
+}
+
+function looksLikeDateHeader(text: string): boolean {
+  return /january|february|march|april|may|june|july|august|september|october|november|december/i.test(text) 
+    && /\d{1,2}/.test(text);
+}
+
+function matchesSectionName(text: string): SectionName | null {
+  const lower = text.toLowerCase().trim();
+
+  if (/^call\s+to\s+worship\s*[:\-]?\s*$/i.test(lower) || lower === 'call to worship') {
+    return 'Call to Worship';
+  }
+
+  if (/^worship\s*[:\-]?\s*$/i.test(lower) || lower === 'worship') {
+    return 'Worship';
+  }
+
+  if (/^(?:worship\s+(?:and|&)\s+)?praise\s*[:\-]?\s*$/i.test(lower) || lower === 'praise') {
+    return 'Praise';
+  }
+
+  for (const name of SECTION_NAMES) {
+    if (lower === name.toLowerCase()) {
+      return name;
+    }
+  }
+
+  return null;
+}
+
+function formatDateString(date: Date): string {
+  return date.toISOString().split('T')[0];
+}
+
+function datesMatch(headerDate: Date, targetDate: Date): boolean {
+  return headerDate.getFullYear() === targetDate.getFullYear()
+    && headerDate.getMonth() === targetDate.getMonth()
+    && headerDate.getDate() === targetDate.getDate();
+}
+
+interface ParagraphInfo {
+  text: string;
+  style: string;
   youtubeUrl: string | null;
-  isPlaylist: boolean;
-  weekLabel: string;
 }
 
-export function extractDocumentId(urlOrId: string): string {
-  const match = urlOrId.match(/\/d\/([a-zA-Z0-9_-]+)/);
-  if (match) return match[1];
-  if (/^[a-zA-Z0-9_-]+$/.test(urlOrId)) return urlOrId;
-  throw new Error('Could not extract Google Doc ID from the provided URL');
-}
-
-export async function parseSetlistFromDoc(documentId: string): Promise<ParsedSong[]> {
-  const docs = await getUncachableGoogleDocsClient();
-  const doc = await docs.documents.get({ documentId });
-
-  const content = doc.data.body?.content || [];
-  const songs: ParsedSong[] = [];
-  let currentWeek = 'Unknown Week';
+function extractParagraphs(content: any[]): ParagraphInfo[] {
+  const paragraphs: ParagraphInfo[] = [];
 
   for (const element of content) {
     if (element.paragraph) {
@@ -91,58 +170,111 @@ export async function parseSetlistFromDoc(documentId: string): Promise<ParsedSon
       fullText = fullText.trim();
       if (!fullText) continue;
 
-      if (style.includes('HEADING') || looksLikeWeekHeader(fullText)) {
-        currentWeek = fullText;
-        continue;
+      const inlineUrl = extractYoutubeUrl(fullText);
+      paragraphs.push({
+        text: fullText,
+        style,
+        youtubeUrl: linkUrl || inlineUrl,
+      });
+    }
+  }
+
+  return paragraphs;
+}
+
+export async function parseSetlistForSunday(documentId: string, targetSunday: Date): Promise<WeekData | null> {
+  const docs = await getUncachableGoogleDocsClient();
+  const doc = await docs.documents.get({ documentId });
+  const content = doc.data.body?.content || [];
+  const paragraphs = extractParagraphs(content);
+
+  let foundWeekStart = -1;
+  let foundWeekEnd = paragraphs.length;
+  let rawHeader = '';
+
+  for (let i = 0; i < paragraphs.length; i++) {
+    const p = paragraphs[i];
+    const isHeading = p.style.includes('HEADING') || looksLikeDateHeader(p.text);
+
+    if (isHeading) {
+      const headerDate = parseDateFromHeader(p.text);
+      if (headerDate && datesMatch(headerDate, targetSunday)) {
+        foundWeekStart = i + 1;
+        rawHeader = p.text;
+      } else if (foundWeekStart >= 0 && headerDate) {
+        foundWeekEnd = i;
+        break;
       }
+    }
+  }
 
-      const inlineYoutubeUrl = extractYoutubeUrl(fullText);
-      const finalUrl = linkUrl || inlineYoutubeUrl;
+  if (foundWeekStart < 0) return null;
 
-      const title = cleanSongTitle(fullText);
-      if (title) {
-        songs.push({
-          title,
-          youtubeUrl: finalUrl,
-          isPlaylist: finalUrl ? isPlaylistUrl(finalUrl) : false,
-          weekLabel: currentWeek,
+  const weekParagraphs = paragraphs.slice(foundWeekStart, foundWeekEnd);
+
+  const sections: SectionData[] = [];
+  let currentSection: SectionData | null = null;
+  let foundLeaderForCurrentSection = false;
+
+  for (const p of weekParagraphs) {
+    const sectionName = matchesSectionName(p.text);
+    if (sectionName && !p.youtubeUrl) {
+      if (currentSection) sections.push(currentSection);
+      currentSection = { name: sectionName, leaderEmail: null, songs: [] };
+      foundLeaderForCurrentSection = false;
+      continue;
+    }
+
+    if (!currentSection) continue;
+
+    if (!foundLeaderForCurrentSection && isEmailAddress(p.text)) {
+      currentSection.leaderEmail = p.text.trim();
+      foundLeaderForCurrentSection = true;
+      continue;
+    }
+
+    const cleanedTitle = p.text
+      .replace(/(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/playlist\?)[^\s]*/gi, '')
+      .replace(/[-–—•*·]\s*/, '')
+      .trim();
+
+    if (cleanedTitle.length >= 2 && !isEmailAddress(cleanedTitle)) {
+      currentSection.songs.push({
+        title: cleanedTitle,
+        youtubeUrl: p.youtubeUrl,
+      });
+    }
+  }
+
+  if (currentSection) sections.push(currentSection);
+
+  return {
+    sundayDate: formatDateString(targetSunday),
+    rawHeader,
+    sections,
+  };
+}
+
+export async function getAllSundays(documentId: string): Promise<{ date: string; header: string }[]> {
+  const docs = await getUncachableGoogleDocsClient();
+  const doc = await docs.documents.get({ documentId });
+  const content = doc.data.body?.content || [];
+  const paragraphs = extractParagraphs(content);
+
+  const sundays: { date: string; header: string }[] = [];
+
+  for (const p of paragraphs) {
+    const isHeading = p.style.includes('HEADING') || looksLikeDateHeader(p.text);
+    if (isHeading) {
+      const headerDate = parseDateFromHeader(p.text);
+      if (headerDate && headerDate.getDay() === 0) {
+        sundays.push({
+          date: formatDateString(headerDate),
+          header: p.text,
         });
       }
     }
   }
 
-  return songs;
-}
-
-function isYoutubeUrl(url: string): boolean {
-  return /youtube\.com|youtu\.be/i.test(url);
-}
-
-function extractYoutubeUrl(text: string): string | null {
-  const match = text.match(/(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)[^\s]+/i);
-  return match ? match[0] : null;
-}
-
-function looksLikeWeekHeader(text: string): boolean {
-  return /week|sunday|service|date|january|february|march|april|may|june|july|august|september|october|november|december|\d{1,2}[\/-]\d{1,2}/i.test(text);
-}
-
-const SKIP_ENTRIES = [
-  'to be posted', 'tbd', 'tba', 'n/a', 'na', 'none', 'pending',
-  'worship', 'praise', 'call to worship', 'ministration',
-  'offering', 'prayer', 'sermon', 'benediction', 'announcements',
-];
-
-function isPlaylistUrl(url: string): boolean {
-  return /playlist\?list=|\/playlist\//.test(url);
-}
-
-function cleanSongTitle(text: string): string {
-  let cleaned = text.replace(/(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/playlist\?|youtube\.com\/clip\/)[^\s]*/gi, '');
-  cleaned = cleaned.replace(/[-–—•*·]\s*/, '');
-  cleaned = cleaned.trim();
-  if (cleaned.length < 2) return '';
-  if (SKIP_ENTRIES.includes(cleaned.toLowerCase())) return '';
-  if (looksLikeWeekHeader(cleaned) && !/[a-z]/i.test(cleaned.replace(/\d+/g, '').replace(/[\s\-\/]/g, ''))) return '';
-  return cleaned;
+  return sundays;
 }

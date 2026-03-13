@@ -1,469 +1,425 @@
-import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import {
-  Music, FileText, Send, Loader2, CheckCircle2, XCircle,
-  SkipForward, Clock, RefreshCw, Mail, ExternalLink, Zap
+  Music, CheckCircle2, XCircle, AlertTriangle, Clock,
+  RefreshCw, Mail, Calendar, Play, User, Link2, Loader2
 } from 'lucide-react';
 
-const MUSICAL_KEYS = [
-  'C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'F',
-  'F#', 'Gb', 'G', 'G#', 'Ab', 'A', 'A#', 'Bb', 'B',
-  'Cm', 'C#m', 'Dm', 'D#m', 'Ebm', 'Em', 'Fm',
-  'F#m', 'Gm', 'G#m', 'Am', 'A#m', 'Bbm', 'Bm'
-];
-
-interface ParsedSong {
-  title: string;
-  youtubeUrl: string | null;
-  isPlaylist: boolean;
-  weekLabel: string;
+interface SectionValidation {
+  sectionName: string;
+  leaderEmail: string | null;
+  status: 'complete' | 'missing_songs' | 'missing_links' | 'missing_leader';
+  songCount: number;
+  songsWithLinks: number;
+  songsWithoutLinks: string[];
 }
 
-interface SongWithKey extends ParsedSong {
-  targetKey: string;
+interface EmailSent {
+  to: string;
+  type: 'leader_reminder' | 'admin_missing_leader';
+  sectionName: string;
+  sentAt: string;
 }
 
-interface ProcessingJob {
+interface ValidationResult {
   id: string;
-  status: 'pending' | 'processing' | 'completed' | 'error';
-  songs: Array<{
-    title: string;
-    youtubeUrl: string | null;
-    targetKey?: string;
-    status: string;
-    error?: string;
-  }>;
-  emailTo: string;
-  weekLabel: string;
-  startedAt: string;
-  completedAt?: string;
-  totalProcessed: number;
-  totalSuccess: number;
-  totalErrors: number;
+  targetSunday: string;
+  ranAt: string;
+  trigger: 'scheduled' | 'manual';
+  sections: SectionValidation[];
+  emailsSent: EmailSent[];
+  error?: string;
+}
+
+interface ScheduleInfo {
+  nextRunAt: string;
+  targetSunday: string;
+}
+
+interface PreviewData {
+  targetSunday: string;
+  weekData: {
+    sundayDate: string;
+    rawHeader: string;
+    sections: Array<{
+      name: string;
+      leaderEmail: string | null;
+      songs: Array<{ title: string; youtubeUrl: string | null }>;
+    }>;
+  } | null;
+}
+
+function statusIcon(status: string) {
+  switch (status) {
+    case 'complete': return <CheckCircle2 className="w-4 h-4 text-green-500" />;
+    case 'missing_leader': return <XCircle className="w-4 h-4 text-red-500" />;
+    case 'missing_songs': return <AlertTriangle className="w-4 h-4 text-amber-500" />;
+    case 'missing_links': return <AlertTriangle className="w-4 h-4 text-amber-500" />;
+    default: return <Clock className="w-4 h-4 text-muted-foreground" />;
+  }
+}
+
+function statusLabel(status: string) {
+  switch (status) {
+    case 'complete': return 'Complete';
+    case 'missing_leader': return 'No Leader';
+    case 'missing_songs': return 'No Songs';
+    case 'missing_links': return 'Missing Links';
+    default: return status;
+  }
+}
+
+function statusBadgeVariant(status: string): 'default' | 'destructive' | 'secondary' | 'outline' {
+  switch (status) {
+    case 'complete': return 'default';
+    case 'missing_leader': return 'destructive';
+    case 'missing_songs': return 'secondary';
+    case 'missing_links': return 'secondary';
+    default: return 'outline';
+  }
+}
+
+function formatDate(dateStr: string) {
+  return new Date(dateStr + (dateStr.includes('T') ? '' : 'T00:00:00')).toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function formatDateTime(dateStr: string) {
+  return new Date(dateStr).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
 }
 
 export default function Dashboard() {
-  const [docUrl, setDocUrl] = useState('');
-  const [emailTo, setEmailTo] = useState('');
-  const [songs, setSongs] = useState<SongWithKey[]>([]);
-  const [activeJobId, setActiveJobId] = useState<string | null>(null);
-  const [weekGroups, setWeekGroups] = useState<Record<string, SongWithKey[]>>({});
-  const [selectedWeek, setSelectedWeek] = useState<string>('');
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const parseMutation = useMutation({
-    mutationFn: async (url: string) => {
-      const res = await fetch('/api/parse-doc', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ docUrl: url }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.message);
-      }
-      return res.json();
-    },
-    onSuccess: (data) => {
-      const songsWithKeys: SongWithKey[] = data.songs.map((s: ParsedSong) => ({
-        ...s,
-        targetKey: '',
-      }));
-
-      const groups: Record<string, SongWithKey[]> = {};
-      for (const song of songsWithKeys) {
-        if (!groups[song.weekLabel]) groups[song.weekLabel] = [];
-        groups[song.weekLabel].push(song);
-      }
-      setWeekGroups(groups);
-
-      const weeks = Object.keys(groups);
-      if (weeks.length > 0) {
-        setSelectedWeek(weeks[0]);
-        setSongs(groups[weeks[0]]);
-      }
-
-      toast({
-        title: 'Setlist loaded',
-        description: `Found ${data.songs.length} songs across ${weeks.length} week(s)`,
-      });
-    },
-    onError: (err: Error) => {
-      toast({
-        title: 'Failed to parse document',
-        description: err.message,
-        variant: 'destructive',
-      });
-    },
+  const { data: schedule } = useQuery<ScheduleInfo>({
+    queryKey: ['schedule'],
+    queryFn: () => fetch('/api/schedule').then((r) => r.json()),
   });
 
-  const processMutation = useMutation({
+  const { data: history, isLoading: historyLoading } = useQuery<ValidationResult[]>({
+    queryKey: ['history'],
+    queryFn: () => fetch('/api/history').then((r) => r.json()),
+    refetchInterval: 30000,
+  });
+
+  const { data: preview, isLoading: previewLoading } = useQuery<PreviewData>({
+    queryKey: ['preview'],
+    queryFn: () => fetch('/api/preview').then((r) => r.json()),
+  });
+
+  const runNowMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch('/api/process', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          songs: songs.map((s) => ({
-            title: s.title,
-            youtubeUrl: s.youtubeUrl,
-            targetKey: s.targetKey || undefined,
-          })),
-          emailTo,
-          weekLabel: selectedWeek,
-        }),
-      });
+      const res = await fetch('/api/validate', { method: 'POST' });
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.message);
       }
       return res.json();
     },
-    onSuccess: (data) => {
-      setActiveJobId(data.jobId);
+    onSuccess: (result: ValidationResult) => {
+      queryClient.invalidateQueries({ queryKey: ['history'] });
+      queryClient.invalidateQueries({ queryKey: ['preview'] });
+      const complete = result.sections.filter((s) => s.status === 'complete').length;
       toast({
-        title: 'Processing started',
-        description: 'Your songs are being processed. You\'ll get an email when done.',
+        title: 'Validation complete',
+        description: `${complete}/${result.sections.length} sections ready. ${result.emailsSent.length} email(s) sent.`,
       });
     },
     onError: (err: Error) => {
       toast({
-        title: 'Failed to start processing',
+        title: 'Validation failed',
         description: err.message,
         variant: 'destructive',
       });
     },
   });
 
-  const { data: activeJob } = useQuery<ProcessingJob>({
-    queryKey: ['job', activeJobId],
-    queryFn: async () => {
-      const res = await fetch(`/api/jobs/${activeJobId}`);
-      return res.json();
-    },
-    enabled: !!activeJobId,
-    refetchInterval: activeJobId ? 3000 : false,
-  });
-
-  useEffect(() => {
-    if (activeJob?.status === 'completed' || activeJob?.status === 'error') {
-      queryClient.invalidateQueries({ queryKey: ['jobs'] });
-    }
-  }, [activeJob?.status]);
-
-  const { data: pastJobs } = useQuery<ProcessingJob[]>({
-    queryKey: ['jobs'],
-    queryFn: async () => {
-      const res = await fetch('/api/jobs');
-      return res.json();
-    },
-  });
-
-  function handleWeekChange(week: string) {
-    setSelectedWeek(week);
-    setSongs(weekGroups[week] || []);
-  }
-
-  function updateSongKey(index: number, key: string) {
-    setSongs((prev) => {
-      const updated = [...prev];
-      updated[index] = { ...updated[index], targetKey: key };
-      return updated;
-    });
-  }
-
-  function setAllKeys(key: string) {
-    setSongs((prev) => prev.map((s) => ({ ...s, targetKey: key })));
-  }
-
-  const songsWithLinks = songs.filter((s) => s.youtubeUrl);
-  const isProcessing = activeJob && (activeJob.status === 'pending' || activeJob.status === 'processing');
+  const latestRun = history?.[0];
 
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border/50 bg-card/50 backdrop-blur-md sticky top-0 z-50">
-        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-            <Music className="w-5 h-5 text-primary" />
+        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+              <Music className="w-5 h-5 text-primary" />
+            </div>
+            <div>
+              <h1 className="text-lg font-semibold tracking-tight" data-testid="text-app-title">Worship Flow</h1>
+              <p className="text-xs text-muted-foreground">Setlist validation & reminders</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-lg font-semibold tracking-tight" data-testid="text-app-title">Worship Flow</h1>
-            <p className="text-xs text-muted-foreground">Setlist automation for your team</p>
-          </div>
+          <Button
+            data-testid="button-run-now"
+            onClick={() => runNowMutation.mutate()}
+            disabled={runNowMutation.isPending}
+            size="sm"
+          >
+            {runNowMutation.isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin mr-2" />
+            ) : (
+              <Play className="w-4 h-4 mr-2" />
+            )}
+            Run Now
+          </Button>
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-6 py-8 space-y-8">
-        <Card className="border-border/50">
-          <CardHeader className="pb-4">
-            <CardTitle className="text-base flex items-center gap-2">
-              <FileText className="w-4 h-4 text-primary" />
-              Load Setlist from Google Doc
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex gap-3">
-              <Input
-                data-testid="input-doc-url"
-                placeholder="Paste your Google Doc URL here..."
-                value={docUrl}
-                onChange={(e) => setDocUrl(e.target.value)}
-                className="flex-1"
-              />
-              <Button
-                data-testid="button-parse-doc"
-                onClick={() => parseMutation.mutate(docUrl)}
-                disabled={!docUrl || parseMutation.isPending}
-              >
-                {parseMutation.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                ) : (
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                )}
-                Load
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {Object.keys(weekGroups).length > 0 && (
-          <>
-            <Card className="border-border/50">
-              <CardHeader className="pb-4">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Music className="w-4 h-4 text-primary" />
-                    Setlist
-                  </CardTitle>
-                  {Object.keys(weekGroups).length > 1 && (
-                    <Select value={selectedWeek} onValueChange={handleWeekChange}>
-                      <SelectTrigger className="w-[240px]" data-testid="select-week">
-                        <SelectValue placeholder="Select week" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Object.keys(weekGroups).map((week) => (
-                          <SelectItem key={week} value={week}>
-                            {week} ({weekGroups[week].length} songs)
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {songs.length > 1 && (
-                  <div className="flex items-center gap-2 pb-2">
-                    <span className="text-sm text-muted-foreground">Set all keys to:</span>
-                    <Select onValueChange={setAllKeys}>
-                      <SelectTrigger className="w-[100px]" data-testid="select-all-keys">
-                        <SelectValue placeholder="Key" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {MUSICAL_KEYS.map((key) => (
-                          <SelectItem key={key} value={key}>{key}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-
-                {songs.map((song, i) => (
-                  <div
-                    key={i}
-                    data-testid={`card-song-${i}`}
-                    className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 border border-border/30 hover:border-border/60 transition-colors"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm truncate" data-testid={`text-song-title-${i}`}>
-                        {song.title}
-                      </p>
-                      <div className="flex items-center gap-2 mt-1">
-                        {song.youtubeUrl ? (
-                          <div className="flex items-center gap-2">
-                            <a
-                              href={song.youtubeUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-xs text-primary/70 hover:text-primary flex items-center gap-1"
-                              data-testid={`link-youtube-${i}`}
-                            >
-                              <ExternalLink className="w-3 h-3" />
-                              YouTube
-                            </a>
-                            {song.isPlaylist && (
-                              <Badge variant="secondary" className="text-xs">
-                                Playlist
-                              </Badge>
-                            )}
-                          </div>
-                        ) : (
-                          <Badge variant="secondary" className="text-xs" data-testid={`badge-no-link-${i}`}>
-                            Title only
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-
-                    <Select
-                      value={song.targetKey}
-                      onValueChange={(val) => updateSongKey(i, val)}
-                    >
-                      <SelectTrigger className="w-[100px]" data-testid={`select-key-${i}`}>
-                        <SelectValue placeholder="Key" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="original">Original</SelectItem>
-                        {MUSICAL_KEYS.map((key) => (
-                          <SelectItem key={key} value={key}>{key}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ))}
-
-                {songsWithLinks.length === 0 && songs.length > 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-4">
-                    No songs with YouTube links found. Songs without links will be skipped during processing.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="border-border/50">
-              <CardHeader className="pb-4">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Send className="w-4 h-4 text-primary" />
-                  Process &amp; Send
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex gap-3">
-                  <div className="flex-1">
-                    <label className="text-sm text-muted-foreground mb-1 block">Send results to:</label>
-                    <Input
-                      data-testid="input-email"
-                      type="email"
-                      placeholder="your@email.com"
-                      value={emailTo}
-                      onChange={(e) => setEmailTo(e.target.value)}
-                    />
+      <main className="max-w-5xl mx-auto px-6 py-8 space-y-6">
+        {schedule && (
+          <Card className="border-border/50">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between flex-wrap gap-4">
+                <div className="flex items-center gap-3">
+                  <Calendar className="w-5 h-5 text-primary" />
+                  <div>
+                    <p className="text-sm font-medium" data-testid="text-next-run">
+                      Next check: {formatDateTime(schedule.nextRunAt)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Validating setlist for Sunday {formatDate(schedule.targetSunday)}
+                    </p>
                   </div>
                 </div>
-
-                <Button
-                  data-testid="button-process"
-                  className="w-full"
-                  size="lg"
-                  onClick={() => processMutation.mutate()}
-                  disabled={songsWithLinks.length === 0 || !emailTo || processMutation.isPending || !!isProcessing}
-                >
-                  {processMutation.isPending || isProcessing ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                      Processing...
-                    </>
-                  ) : (
-                    <>
-                      <Zap className="w-4 h-4 mr-2" />
-                      Process {songsWithLinks.length} Song{songsWithLinks.length !== 1 ? 's' : ''} &amp; Email
-                    </>
-                  )}
-                </Button>
-              </CardContent>
-            </Card>
-          </>
+                <Badge variant="outline" className="text-xs">
+                  <Clock className="w-3 h-3 mr-1" />
+                  Every Tuesday 9 AM & 5 PM
+                </Badge>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
-        {activeJob && (
-          <Card className="border-primary/30 bg-primary/5">
+        {preview && preview.weekData && (
+          <Card className="border-border/50">
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                {activeJob.status === 'processing' || activeJob.status === 'pending' ? (
-                  <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                ) : activeJob.status === 'completed' ? (
-                  <CheckCircle2 className="w-4 h-4 text-green-500" />
-                ) : (
-                  <XCircle className="w-4 h-4 text-destructive" />
-                )}
-                Current Job — {activeJob.weekLabel}
+                <RefreshCw className="w-4 h-4 text-primary" />
+                Current Setlist Preview — {formatDate(preview.targetSunday)}
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2">
-              {activeJob.songs.map((song, i) => (
-                <div key={i} className="flex items-center gap-2 text-sm" data-testid={`status-song-${i}`}>
-                  {song.status === 'success' && <CheckCircle2 className="w-3.5 h-3.5 text-green-500 shrink-0" />}
-                  {song.status === 'error' && <XCircle className="w-3.5 h-3.5 text-destructive shrink-0" />}
-                  {song.status === 'processing' && <Loader2 className="w-3.5 h-3.5 animate-spin text-primary shrink-0" />}
-                  {song.status === 'pending' && <Clock className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
-                  {song.status === 'skipped' && <SkipForward className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
-                  <span className={song.status === 'skipped' ? 'text-muted-foreground' : ''}>
-                    {song.title}
-                    {song.targetKey && <span className="text-muted-foreground ml-1">({song.targetKey})</span>}
-                  </span>
-                  {song.error && (
-                    <span className="text-xs text-destructive ml-auto">{song.error}</span>
-                  )}
-                </div>
-              ))}
-
-              {activeJob.status === 'completed' && (
-                <div className="pt-2 border-t border-border/30 mt-3">
-                  <p className="text-sm text-green-600 flex items-center gap-1.5">
-                    <Mail className="w-3.5 h-3.5" />
-                    Email sent to {activeJob.emailTo}
+            <CardContent>
+              <div className="grid gap-4 md:grid-cols-3">
+                {preview.weekData.sections.map((section) => (
+                  <div
+                    key={section.name}
+                    className="p-4 rounded-lg border border-border/50 bg-muted/20"
+                    data-testid={`preview-section-${section.name.replace(/\s+/g, '-').toLowerCase()}`}
+                  >
+                    <h3 className="font-medium text-sm mb-2">{section.name}</h3>
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-3">
+                      <User className="w-3 h-3" />
+                      <span data-testid={`text-leader-${section.name.replace(/\s+/g, '-').toLowerCase()}`}>
+                        {section.leaderEmail || 'No leader assigned'}
+                      </span>
+                    </div>
+                    {section.songs.length > 0 ? (
+                      <ul className="space-y-1.5">
+                        {section.songs.map((song, i) => (
+                          <li key={i} className="flex items-start gap-1.5 text-xs">
+                            {song.youtubeUrl ? (
+                              <Link2 className="w-3 h-3 text-green-500 mt-0.5 shrink-0" />
+                            ) : (
+                              <XCircle className="w-3 h-3 text-amber-500 mt-0.5 shrink-0" />
+                            )}
+                            <span className="truncate">{song.title}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-xs text-muted-foreground italic">No songs yet</p>
+                    )}
+                  </div>
+                ))}
+                {preview.weekData.sections.length === 0 && (
+                  <p className="text-sm text-muted-foreground col-span-3 text-center py-4">
+                    No sections found for this Sunday in the document.
                   </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {preview && !preview.weekData && !previewLoading && (
+          <Card className="border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20">
+            <CardContent className="py-4">
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-500" />
+                <div>
+                  <p className="text-sm font-medium">No setlist found</p>
+                  <p className="text-xs text-muted-foreground">
+                    Could not find a section for Sunday {formatDate(preview.targetSunday)} in the document.
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {previewLoading && (
+          <Card className="border-border/50">
+            <CardContent className="py-8 flex items-center justify-center gap-2 text-muted-foreground">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span className="text-sm">Loading setlist preview...</span>
+            </CardContent>
+          </Card>
+        )}
+
+        {latestRun && (
+          <Card className="border-border/50">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-primary" />
+                  Latest Validation — {formatDate(latestRun.targetSunday)}
+                </CardTitle>
+                <Badge variant="outline" className="text-xs">
+                  {latestRun.trigger === 'scheduled' ? 'Scheduled' : 'Manual'} — {formatDateTime(latestRun.ranAt)}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {latestRun.error ? (
+                <div className="flex items-center gap-2 text-sm text-red-500" data-testid="text-validation-error">
+                  <XCircle className="w-4 h-4" />
+                  {latestRun.error}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="grid gap-3 md:grid-cols-3">
+                    {latestRun.sections.map((section) => (
+                      <div
+                        key={section.sectionName}
+                        className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/30"
+                        data-testid={`validation-section-${section.sectionName.replace(/\s+/g, '-').toLowerCase()}`}
+                      >
+                        <div className="flex items-center gap-2">
+                          {statusIcon(section.status)}
+                          <div>
+                            <p className="text-sm font-medium">{section.sectionName}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {section.leaderEmail || 'No leader'}
+                            </p>
+                          </div>
+                        </div>
+                        <Badge variant={statusBadgeVariant(section.status)} className="text-xs">
+                          {statusLabel(section.status)}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+
+                  {latestRun.emailsSent.length > 0 && (
+                    <div className="border-t border-border/30 pt-3">
+                      <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1">
+                        <Mail className="w-3 h-3" />
+                        Emails sent:
+                      </p>
+                      <div className="space-y-1">
+                        {latestRun.emailsSent.map((email, i) => (
+                          <div key={i} className="flex items-center gap-2 text-xs" data-testid={`email-sent-${i}`}>
+                            <Badge variant="outline" className="text-xs">
+                              {email.type === 'leader_reminder' ? 'Reminder' : 'Admin Alert'}
+                            </Badge>
+                            <span>{email.to}</span>
+                            <span className="text-muted-foreground">({email.sectionName})</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>
           </Card>
         )}
 
-        {pastJobs && pastJobs.length > 0 && (
-          <Card className="border-border/50">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Clock className="w-4 h-4 text-muted-foreground" />
-                Recent Jobs
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                {pastJobs.filter(j => j.id !== activeJobId).slice(0, 5).map((job) => (
-                  <div
-                    key={job.id}
-                    className="flex items-center justify-between p-3 rounded-lg bg-muted/20"
-                    data-testid={`job-${job.id}`}
-                  >
-                    <div>
-                      <p className="text-sm font-medium">{job.weekLabel}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {new Date(job.startedAt).toLocaleDateString()} — {job.songs.length} songs
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge
-                        variant={job.status === 'completed' ? 'default' : job.status === 'error' ? 'destructive' : 'secondary'}
-                      >
-                        {job.status === 'completed' && `${job.totalSuccess} sent`}
-                        {job.status === 'error' && 'Error'}
-                        {job.status === 'processing' && 'In Progress'}
-                        {job.status === 'pending' && 'Pending'}
-                      </Badge>
-                    </div>
-                  </div>
-                ))}
+        <Card className="border-border/50">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Clock className="w-4 h-4 text-muted-foreground" />
+              Run History
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {historyLoading ? (
+              <div className="flex items-center justify-center gap-2 py-4 text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span className="text-sm">Loading...</span>
               </div>
-            </CardContent>
-          </Card>
-        )}
+            ) : history && history.length > 0 ? (
+              <div className="space-y-2">
+                {history.slice(0, 10).map((run) => {
+                  const completeCount = run.sections.filter((s) => s.status === 'complete').length;
+                  const totalSections = run.sections.length;
+                  const allGood = completeCount === totalSections && totalSections > 0;
+
+                  return (
+                    <div
+                      key={run.id}
+                      className="flex items-center justify-between p-3 rounded-lg bg-muted/20 hover:bg-muted/30 transition-colors"
+                      data-testid={`history-run-${run.id}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        {run.error ? (
+                          <XCircle className="w-4 h-4 text-red-500" />
+                        ) : allGood ? (
+                          <CheckCircle2 className="w-4 h-4 text-green-500" />
+                        ) : (
+                          <AlertTriangle className="w-4 h-4 text-amber-500" />
+                        )}
+                        <div>
+                          <p className="text-sm font-medium">
+                            Sunday {formatDate(run.targetSunday)}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatDateTime(run.ranAt)} — {run.trigger}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {run.error ? (
+                          <Badge variant="destructive" className="text-xs">Error</Badge>
+                        ) : (
+                          <>
+                            <Badge variant={allGood ? 'default' : 'secondary'} className="text-xs">
+                              {completeCount}/{totalSections} ready
+                            </Badge>
+                            {run.emailsSent.length > 0 && (
+                              <Badge variant="outline" className="text-xs">
+                                <Mail className="w-3 h-3 mr-1" />
+                                {run.emailsSent.length}
+                              </Badge>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center py-6" data-testid="text-no-history">
+                No validation runs yet. Click "Run Now" to perform the first check.
+              </p>
+            )}
+          </CardContent>
+        </Card>
       </main>
     </div>
   );
