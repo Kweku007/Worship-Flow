@@ -30,9 +30,13 @@ async function getAccessToken() {
     }
   ).then(res => res.json()).then(data => data.items?.[0]);
 
-  const accessToken = connectionSettings?.settings?.access_token || connectionSettings.settings?.oauth?.credentials?.access_token;
+  if (!connectionSettings) {
+    throw new Error('Google Docs not connected');
+  }
 
-  if (!connectionSettings || !accessToken) {
+  const accessToken = connectionSettings.settings?.access_token || connectionSettings.settings?.oauth?.credentials?.access_token;
+
+  if (!accessToken) {
     throw new Error('Google Docs not connected');
   }
   return accessToken;
@@ -102,8 +106,7 @@ function isSundayDate(header: string): boolean {
 }
 
 function looksLikeDateHeader(text: string): boolean {
-  return /january|february|march|april|may|june|july|august|september|october|november|december/i.test(text) 
-    && /\d{1,2}/.test(text);
+  return parseDateFromHeader(text) !== null;
 }
 
 function matchesSectionName(text: string): SectionName | null {
