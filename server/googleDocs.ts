@@ -147,6 +147,7 @@ interface ParagraphInfo {
   text: string;
   style: string;
   youtubeUrl: string | null;
+  personEmail: string | null;
 }
 
 function extractParagraphs(content: any[]): ParagraphInfo[] {
@@ -159,14 +160,34 @@ function extractParagraphs(content: any[]): ParagraphInfo[] {
 
       let fullText = '';
       let linkUrl: string | null = null;
+      let personEmail: string | null = null;
 
       for (const el of para.elements || []) {
-        const text = el.textRun?.content || '';
-        fullText += text;
+        if (el.textRun) {
+          const text = el.textRun.content || '';
+          fullText += text;
 
-        const link = el.textRun?.textStyle?.link?.url;
-        if (link && isYoutubeUrl(link)) {
-          linkUrl = link;
+          const link = el.textRun.textStyle?.link?.url;
+          if (link && isYoutubeUrl(link)) {
+            linkUrl = link;
+          }
+        }
+
+        if (el.person?.personProperties) {
+          const props = el.person.personProperties;
+          personEmail = props.email || null;
+          fullText += props.name || props.email || '';
+        }
+
+        if (el.richLink?.richLinkProperties) {
+          const rlProps = el.richLink.richLinkProperties;
+          const uri = rlProps.uri || '';
+          if (isYoutubeUrl(uri)) {
+            linkUrl = uri;
+            fullText += rlProps.title || uri;
+          } else {
+            fullText += rlProps.title || uri;
+          }
         }
       }
 
@@ -178,6 +199,7 @@ function extractParagraphs(content: any[]): ParagraphInfo[] {
         text: fullText,
         style,
         youtubeUrl: linkUrl || inlineUrl,
+        personEmail,
       });
     }
   }
@@ -233,8 +255,8 @@ export async function parseSetlistForSunday(documentId: string, targetSunday: Da
 
     if (!currentSection) continue;
 
-    if (!foundLeaderForCurrentSection && isEmailAddress(p.text)) {
-      currentSection.leaderEmail = p.text.trim();
+    if (!foundLeaderForCurrentSection && (p.personEmail || isEmailAddress(p.text))) {
+      currentSection.leaderEmail = p.personEmail || p.text.trim();
       foundLeaderForCurrentSection = true;
       continue;
     }
@@ -260,6 +282,7 @@ export async function parseSetlistForSunday(documentId: string, targetSunday: Da
     sections,
   };
 }
+
 
 
 export async function getAllSundays(documentId: string): Promise<{ date: string; header: string }[]> {
