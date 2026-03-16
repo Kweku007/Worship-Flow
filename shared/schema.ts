@@ -1,7 +1,13 @@
 import { z } from "zod";
+import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
 export const DOCUMENT_ID = "1SD2t9J7jYZUnN9QDOr2TWgtfkEkOfe4yuxYYb1_WwLY";
 export const ADMIN_EMAIL = "hello@kwekuaboagye.me";
+
+export const schedulerState = pgTable("scheduler_state", {
+  key: text("key").primaryKey(),
+  lastRunAt: timestamp("last_run_at", { withTimezone: true }).notNull(),
+});
 
 export const SECTION_NAMES = ["Call to Worship", "Worship", "Praise"] as const;
 export type SectionName = (typeof SECTION_NAMES)[number];

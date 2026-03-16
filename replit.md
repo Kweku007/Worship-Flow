@@ -7,14 +7,16 @@ Automated setlist validation and email reminder system for church worship teams.
 - **Frontend**: React + Vite + TanStack Query + Tailwind v4 + shadcn/ui
 - **Backend**: Express.js API server
 - **Integrations**: Google Docs (read setlists), Gmail (send reminders)
-- **Scheduler**: node-cron for automated Tuesday checks (9 AM & 5 PM)
+- **Database**: PostgreSQL (Drizzle ORM) — stores scheduler state for crash-resilient catch-up
+- **Scheduler**: node-cron for automated Mon-Sat checks (9 AM & 5 PM CT) with startup catch-up logic
 
 ## Key Files
 
 - `server/googleDocs.ts` - Google Docs API client; parses setlist document by Sunday date, extracting sections, leader emails, and songs with YouTube links
 - `server/gmail.ts` - Gmail API client (Replit connector); sends plain HTML emails
 - `server/validator.ts` - Validation engine; checks sections for missing leaders, songs, or YouTube links; sends appropriate notification emails
-- `server/scheduler.ts` - Cron scheduler; runs validation every Tuesday at 9 AM and 5 PM targeting the Sunday ~12 days out; stores run history in memory
+- `server/db.ts` - PostgreSQL connection pool and Drizzle ORM instance
+- `server/scheduler.ts` - Cron scheduler with startup catch-up; runs validation Mon-Sat at 9 AM and 5 PM CT; persists last run timestamp to DB so missed runs are caught up on restart
 - `server/routes.ts` - API routes for manual validation, history, schedule info, and setlist preview
 - `client/src/pages/dashboard.tsx` - Main dashboard UI showing schedule, preview, validation results, and run history
 - `shared/schema.ts` - TypeScript types and constants (doc ID, admin email, section names)
