@@ -3,7 +3,8 @@ import type { Server } from "http";
 import { DOCUMENT_ID, SECTION_NAMES } from "@shared/schema";
 import type { WeekData } from "@shared/schema";
 import { parseSetlistForSunday, getAllSundays } from "./googleDocs";
-import { runValidation, getRunHistory, getNextScheduledRun, getTargetSunday } from "./scheduler";
+import { runValidation, getNextScheduledRun, getTargetSunday } from "./scheduler";
+import { storage } from "./storage";
 import { log } from "./index";
 
 export async function registerRoutes(
@@ -27,8 +28,8 @@ export async function registerRoutes(
     }
   });
 
-  app.get('/api/history', (_req, res) => {
-    const history = getRunHistory();
+  app.get('/api/history', async (_req, res) => {
+    const history = await storage.getRunHistory(10);
     res.json(history);
   });
 

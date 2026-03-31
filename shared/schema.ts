@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, jsonb } from "drizzle-orm/pg-core";
 
 export const DOCUMENT_ID = "1SD2t9J7jYZUnN9QDOr2TWgtfkEkOfe4yuxYYb1_WwLY";
 export const ADMIN_EMAIL = "hello@kwekuaboagye.me";
@@ -61,3 +61,13 @@ export interface ScheduleInfo {
   nextRunAt: string;
   targetSunday: string;
 }
+
+export const runHistory = pgTable("run_history", {
+  id: text("id").primaryKey(),
+  targetSunday: text("target_sunday").notNull(),
+  ranAt: timestamp("ran_at", { withTimezone: true }).notNull(),
+  trigger: text("trigger").notNull(),
+  sections: jsonb("sections").notNull(),
+  emailsSent: jsonb("emails_sent").notNull(),
+  error: text("error"),
+});

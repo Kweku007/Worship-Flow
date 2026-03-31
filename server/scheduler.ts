@@ -6,6 +6,7 @@ import { parseSetlistForSunday } from './googleDocs';
 import { validateSections, sendValidationEmails } from './validator';
 import { log } from './index';
 import { db } from './db';
+import { storage } from './storage';
 
 const CT_OFFSET_HOURS = 5;
 const CT_9AM_UTC = 9 + CT_OFFSET_HOURS;
@@ -14,9 +15,6 @@ const CT_5PM_UTC = 17 + CT_OFFSET_HOURS;
 const SCHEDULED_HOURS_UTC = [CT_9AM_UTC, CT_5PM_UTC];
 
 const STATE_KEY = 'last_scheduled_run';
-
-const runHistory: ValidationResult[] = [];
-const MAX_HISTORY = 50;
 
 export function getTargetSunday(fromDate: Date = new Date()): Date {
   const day = fromDate.getUTCDay();
@@ -57,7 +55,7 @@ export async function runValidation(trigger: 'scheduled' | 'manual' = 'manual'):
     if (!weekData) {
       result.error = `No section found in the document for Sunday ${targetDateStr}`;
       log(result.error, 'scheduler');
-      addToHistory(result);
+      await storage.saveRunHistory(result);
       return result;
     }
 
@@ -78,19 +76,8 @@ export async function runValidation(trigger: 'scheduled' | 'manual' = 'manual'):
     log(`Validation failed: ${result.error}`, 'scheduler');
   }
 
-  addToHistory(result);
+  await storage.saveRunHistory(result);
   return result;
-}
-
-function addToHistory(result: ValidationResult) {
-  runHistory.unshift(result);
-  if (runHistory.length > MAX_HISTORY) {
-    runHistory.length = MAX_HISTORY;
-  }
-}
-
-export function getRunHistory(): ValidationResult[] {
-  return runHistory;
 }
 
 function toCtComponents(utcDate: Date): { year: number; month: number; day: number; weekday: number; hour: number } {
