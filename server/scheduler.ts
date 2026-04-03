@@ -1,8 +1,8 @@
 import cron from 'node-cron';
 import { eq } from 'drizzle-orm';
 import { DOCUMENT_ID, schedulerState } from '@shared/schema';
-import type { ValidationResult } from '@shared/schema';
-import { parseSetlistForSunday } from './googleDocs';
+import type { ValidationResult, ServiceResult } from '@shared/schema';
+import { getServicesForWeek } from './googleDocs';
 import { validateSections, sendValidationEmails } from './validator';
 import { log } from './index';
 import { db } from './db';
@@ -38,39 +38,61 @@ export async function runValidation(trigger: 'scheduled' | 'manual' = 'manual'):
   const targetDateStr = targetSunday.toISOString().split('T')[0];
   const runId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
-  log(`Starting validation for Sunday ${targetDateStr} (trigger: ${trigger})`, 'scheduler');
+  log(`Starting validation for week of Sunday ${targetDateStr} (trigger: ${trigger})`, 'scheduler');
 
   const result: ValidationResult = {
     id: runId,
     targetSunday: targetDateStr,
     ranAt: new Date().toISOString(),
     trigger,
-    sections: [],
+    services: [],
     emailsSent: [],
   };
 
   try {
-    const weekData = await parseSetlistForSunday(DOCUMENT_ID, targetSunday);
+    const weekServices = await getServicesForWeek(DOCUMENT_ID, targetSunday);
 
-    if (!weekData) {
-      result.error = `No section found in the document for Sunday ${targetDateStr}`;
+    if (weekServices.length === 0) {
+      result.error = `No service sections found in the document for the week of Sunday ${targetDateStr}`;
       log(result.error, 'scheduler');
       await storage.saveRunHistory(result);
       return result;
     }
 
-    result.sections = validateSections(weekData);
+    const allEmailsSent: typeof result.emailsSent = [];
 
-    const complete = result.sections.filter((s) => s.status === 'complete').length;
-    const total = result.sections.length;
+    for (const weekData of weekServices) {
+      const serviceDate = weekData.serviceDate;
+      const sections = validateSections(weekData);
 
-    if (complete === total && trigger === 'scheduled') {
-      log(`All ${total} sections complete for ${targetDateStr} - skipping emails`, 'scheduler');
-    } else {
-      result.emailsSent = await sendValidationEmails(result.sections, targetDateStr);
+      const complete = sections.filter((s) => s.status === 'complete').length;
+      const total = sections.length;
+
+      let serviceEmails: typeof result.emailsSent = [];
+
+      if (complete === total && trigger === 'scheduled') {
+        log(`All ${total} sections complete for ${serviceDate} - skipping emails`, 'scheduler');
+      } else {
+        serviceEmails = await sendValidationEmails(sections, serviceDate);
+        allEmailsSent.push(...serviceEmails);
+      }
+
+      const serviceResult: ServiceResult = {
+        serviceDate,
+        rawHeader: weekData.rawHeader,
+        sections,
+        emailsSent: serviceEmails,
+      };
+
+      result.services.push(serviceResult);
+      log(`Validated ${serviceDate}: ${complete}/${total} sections ready`, 'scheduler');
     }
 
-    log(`Validation complete: ${complete}/${total} sections ready for ${targetDateStr}`, 'scheduler');
+    result.emailsSent = allEmailsSent;
+
+    const totalComplete = result.services.reduce((sum, s) => sum + s.sections.filter((sec) => sec.status === 'complete').length, 0);
+    const totalSections = result.services.reduce((sum, s) => sum + s.sections.length, 0);
+    log(`Validation complete: ${totalComplete}/${totalSections} sections ready across ${result.services.length} service(s)`, 'scheduler');
   } catch (err: any) {
     result.error = err.message || 'Unknown error during validation';
     log(`Validation failed: ${result.error}`, 'scheduler');

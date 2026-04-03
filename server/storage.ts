@@ -15,7 +15,7 @@ export class DatabaseStorage implements IStorage {
       targetSunday: result.targetSunday,
       ranAt: new Date(result.ranAt),
       trigger: result.trigger,
-      sections: result.sections,
+      services: result.services,
       emailsSent: result.emailsSent,
       error: result.error ?? null,
     }).onConflictDoNothing();
@@ -33,7 +33,7 @@ export class DatabaseStorage implements IStorage {
       targetSunday: row.targetSunday,
       ranAt: row.ranAt.toISOString(),
       trigger: row.trigger as ValidationResult["trigger"],
-      sections: row.sections as ValidationResult["sections"],
+      services: (row.services as ValidationResult["services"]) || [],
       emailsSent: row.emailsSent as ValidationResult["emailsSent"],
       ...(row.error ? { error: row.error } : {}),
     }));

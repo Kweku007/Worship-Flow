@@ -2,7 +2,7 @@ import type { Express } from "express";
 import type { Server } from "http";
 import { DOCUMENT_ID, SECTION_NAMES } from "@shared/schema";
 import type { WeekData } from "@shared/schema";
-import { parseSetlistForSunday, getAllSundays } from "./googleDocs";
+import { getServicesForWeek, getAllSundays } from "./googleDocs";
 import { runValidation, getNextScheduledRun, getTargetSunday } from "./scheduler";
 import { storage } from "./storage";
 import { log } from "./index";
@@ -41,28 +41,21 @@ export async function registerRoutes(
   app.get('/api/preview', async (_req, res) => {
     try {
       const targetSunday = getTargetSunday();
-      const weekData = await parseSetlistForSunday(DOCUMENT_ID, targetSunday);
       const targetSundayStr = targetSunday.toISOString().split('T')[0];
 
-      const finalWeekData: WeekData = weekData
-        ? {
-            ...weekData,
+      const weekServices = await getServicesForWeek(DOCUMENT_ID, targetSunday);
+
+      const services: WeekData[] = weekServices.length > 0
+        ? weekServices.map((svc) => ({
+            ...svc,
             sections: SECTION_NAMES.map((name) => {
-              const existing = weekData.sections.find((s) => s.name === name);
+              const existing = svc.sections.find((s) => s.name === name);
               return existing || { name, leaderEmail: null, songs: [] };
             }),
-          }
-        : {
-            sundayDate: targetSundayStr,
-            rawHeader: '',
-            sections: SECTION_NAMES.map((name) => ({
-              name,
-              leaderEmail: null,
-              songs: [],
-            })),
-          };
+          }))
+        : [];
 
-      res.json({ targetSunday: targetSundayStr, weekData: finalWeekData });
+      res.json({ targetSunday: targetSundayStr, services });
     } catch (err: any) {
       log(`Preview error: ${err.message}`, 'routes');
       res.status(500).json({ message: err.message || 'Failed to preview setlist' });

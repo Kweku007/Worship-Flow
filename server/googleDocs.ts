@@ -99,12 +99,6 @@ function parseDateFromHeader(header: string): Date | null {
   return null;
 }
 
-function isSundayDate(header: string): boolean {
-  const date = parseDateFromHeader(header);
-  if (!date) return false;
-  return date.getDay() === 0;
-}
-
 function looksLikeDateHeader(text: string): boolean {
   return parseDateFromHeader(text) !== null;
 }
@@ -207,41 +201,12 @@ function extractParagraphs(content: any[]): ParagraphInfo[] {
   return paragraphs;
 }
 
-export async function parseSetlistForSunday(documentId: string, targetSunday: Date): Promise<WeekData | null> {
-  const docs = await getUncachableGoogleDocsClient();
-  const doc = await docs.documents.get({ documentId });
-  const content = doc.data.body?.content || [];
-  const paragraphs = extractParagraphs(content);
-
-  let foundWeekStart = -1;
-  let foundWeekEnd = paragraphs.length;
-  let rawHeader = '';
-
-  for (let i = 0; i < paragraphs.length; i++) {
-    const p = paragraphs[i];
-    const isHeading = p.style.includes('HEADING') || looksLikeDateHeader(p.text);
-
-    if (isHeading) {
-      const headerDate = parseDateFromHeader(p.text);
-      if (headerDate && datesMatch(headerDate, targetSunday)) {
-        foundWeekStart = i + 1;
-        rawHeader = p.text;
-      } else if (foundWeekStart >= 0 && headerDate) {
-        foundWeekEnd = i;
-        break;
-      }
-    }
-  }
-
-  if (foundWeekStart < 0) return null;
-
-  const weekParagraphs = paragraphs.slice(foundWeekStart, foundWeekEnd);
-
+function parseSectionsFromParagraphs(paragraphs: ParagraphInfo[]): SectionData[] {
   const sections: SectionData[] = [];
   let currentSection: SectionData | null = null;
   let foundLeaderForCurrentSection = false;
 
-  for (const p of weekParagraphs) {
+  for (const p of paragraphs) {
     const sectionName = matchesSectionName(p.text);
     const isExactSectionName = sectionName && SECTION_NAMES.some(
       (n) => p.text.trim().toLowerCase() === n.toLowerCase()
@@ -275,15 +240,112 @@ export async function parseSetlistForSunday(documentId: string, targetSunday: Da
   }
 
   if (currentSection) sections.push(currentSection);
+  return sections;
+}
+
+export async function parseSetlistForDate(documentId: string, targetDate: Date): Promise<WeekData | null> {
+  const docs = await getUncachableGoogleDocsClient();
+  const doc = await docs.documents.get({ documentId });
+  const content = doc.data.body?.content || [];
+  const paragraphs = extractParagraphs(content);
+
+  let foundWeekStart = -1;
+  let foundWeekEnd = paragraphs.length;
+  let rawHeader = '';
+
+  for (let i = 0; i < paragraphs.length; i++) {
+    const p = paragraphs[i];
+    const isHeading = p.style.includes('HEADING') || looksLikeDateHeader(p.text);
+
+    if (isHeading) {
+      const headerDate = parseDateFromHeader(p.text);
+      if (headerDate && datesMatch(headerDate, targetDate)) {
+        foundWeekStart = i + 1;
+        rawHeader = p.text;
+      } else if (foundWeekStart >= 0 && headerDate) {
+        foundWeekEnd = i;
+        break;
+      }
+    }
+  }
+
+  if (foundWeekStart < 0) return null;
+
+  const weekParagraphs = paragraphs.slice(foundWeekStart, foundWeekEnd);
+  const sections = parseSectionsFromParagraphs(weekParagraphs);
 
   return {
-    sundayDate: formatDateString(targetSunday),
+    serviceDate: formatDateString(targetDate),
     rawHeader,
     sections,
   };
 }
 
+export async function parseSetlistForSunday(documentId: string, targetSunday: Date): Promise<WeekData | null> {
+  return parseSetlistForDate(documentId, targetSunday);
+}
 
+export async function getServicesForWeek(documentId: string, targetSunday: Date): Promise<WeekData[]> {
+  const docs = await getUncachableGoogleDocsClient();
+  const doc = await docs.documents.get({ documentId });
+  const content = doc.data.body?.content || [];
+  const paragraphs = extractParagraphs(content);
+
+  const sundayDate = new Date(Date.UTC(
+    targetSunday.getUTCFullYear(),
+    targetSunday.getUTCMonth(),
+    targetSunday.getUTCDate()
+  ));
+  const mondayDate = new Date(sundayDate);
+  mondayDate.setUTCDate(sundayDate.getUTCDate() - 6);
+
+  const datedHeaders: Array<{ index: number; date: Date; text: string }> = [];
+
+  for (let i = 0; i < paragraphs.length; i++) {
+    const p = paragraphs[i];
+    const isHeading = p.style.includes('HEADING') || looksLikeDateHeader(p.text);
+    if (isHeading) {
+      const headerDate = parseDateFromHeader(p.text);
+      if (headerDate) {
+        const d = new Date(Date.UTC(headerDate.getFullYear(), headerDate.getMonth(), headerDate.getDate()));
+        datedHeaders.push({ index: i, date: d, text: p.text });
+      }
+    }
+  }
+
+  const inRangeHeaders = datedHeaders.filter(
+    (h) => h.date >= mondayDate && h.date <= sundayDate
+  );
+
+  if (inRangeHeaders.length === 0) return [];
+
+  const results: WeekData[] = [];
+
+  for (const header of inRangeHeaders) {
+    const contentStart = header.index + 1;
+
+    let contentEnd = paragraphs.length;
+    for (const dh of datedHeaders) {
+      if (dh.index > header.index) {
+        contentEnd = dh.index;
+        break;
+      }
+    }
+
+    const sectionParagraphs = paragraphs.slice(contentStart, contentEnd);
+    const sections = parseSectionsFromParagraphs(sectionParagraphs);
+
+    results.push({
+      serviceDate: formatDateString(header.date),
+      rawHeader: header.text,
+      sections,
+    });
+  }
+
+  results.sort((a, b) => a.serviceDate.localeCompare(b.serviceDate));
+
+  return results;
+}
 
 export async function getAllSundays(documentId: string): Promise<{ date: string; header: string }[]> {
   const docs = await getUncachableGoogleDocsClient();

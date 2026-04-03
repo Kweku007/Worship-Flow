@@ -24,7 +24,7 @@ export interface SectionData {
 }
 
 export interface WeekData {
-  sundayDate: string;
+  serviceDate: string;
   rawHeader: string;
   sections: SectionData[];
 }
@@ -40,12 +40,19 @@ export interface SectionValidation {
   songsWithoutLinks: string[];
 }
 
+export interface ServiceResult {
+  serviceDate: string;
+  rawHeader: string;
+  sections: SectionValidation[];
+  emailsSent: EmailSent[];
+}
+
 export interface ValidationResult {
   id: string;
   targetSunday: string;
   ranAt: string;
   trigger: "scheduled" | "manual";
-  sections: SectionValidation[];
+  services: ServiceResult[];
   emailsSent: EmailSent[];
   error?: string;
 }
@@ -67,7 +74,7 @@ export const runHistory = pgTable("run_history", {
   targetSunday: text("target_sunday").notNull(),
   ranAt: timestamp("ran_at", { withTimezone: true }).notNull(),
   trigger: text("trigger").notNull(),
-  sections: jsonb("sections").notNull(),
+  services: jsonb("services").notNull().default([]),
   emailsSent: jsonb("emails_sent").notNull(),
   error: text("error"),
 });

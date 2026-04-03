@@ -26,12 +26,19 @@ interface EmailSent {
   sentAt: string;
 }
 
+interface ServiceResult {
+  serviceDate: string;
+  rawHeader: string;
+  sections: SectionValidation[];
+  emailsSent: EmailSent[];
+}
+
 interface ValidationResult {
   id: string;
   targetSunday: string;
   ranAt: string;
   trigger: 'scheduled' | 'manual';
-  sections: SectionValidation[];
+  services: ServiceResult[];
   emailsSent: EmailSent[];
   error?: string;
 }
@@ -41,17 +48,19 @@ interface ScheduleInfo {
   targetSunday: string;
 }
 
+interface ServicePreview {
+  serviceDate: string;
+  rawHeader: string;
+  sections: Array<{
+    name: string;
+    leaderEmail: string | null;
+    songs: Array<{ title: string; youtubeUrl: string | null }>;
+  }>;
+}
+
 interface PreviewData {
   targetSunday: string;
-  weekData: {
-    sundayDate: string;
-    rawHeader: string;
-    sections: Array<{
-      name: string;
-      leaderEmail: string | null;
-      songs: Array<{ title: string; youtubeUrl: string | null }>;
-    }>;
-  } | null;
+  services: ServicePreview[];
 }
 
 function statusIcon(status: string) {
@@ -90,6 +99,14 @@ function formatDate(dateStr: string) {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
+  });
+}
+
+function formatServiceDate(dateStr: string) {
+  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
   });
 }
 
@@ -145,10 +162,12 @@ export default function Dashboard() {
       queryClient.invalidateQueries({ queryKey: ['preview'] });
       setShowPinInput(false);
       setPin('');
-      const complete = result.sections.filter((s) => s.status === 'complete').length;
+      const totalComplete = result.services.reduce((sum, s) => sum + s.sections.filter((sec) => sec.status === 'complete').length, 0);
+      const totalSections = result.services.reduce((sum, s) => sum + s.sections.length, 0);
+      const serviceCount = result.services.length;
       toast({
         title: 'Validation complete',
-        description: `${complete}/${result.sections.length} sections ready. ${result.emailsSent.length} email(s) sent.`,
+        description: `${totalComplete}/${totalSections} sections ready across ${serviceCount} service(s). ${result.emailsSent.length} email(s) sent.`,
       });
     },
     onError: (err: Error) => {
@@ -235,7 +254,7 @@ export default function Dashboard() {
                       Next check: {formatDateTime(schedule.nextRunAt)}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      Validating setlist for Sunday {formatDate(schedule.targetSunday)}
+                      Validating setlists for the week of Sunday {formatDate(schedule.targetSunday)}
                     </p>
                   </div>
                 </div>
@@ -248,13 +267,13 @@ export default function Dashboard() {
           </Card>
         )}
 
-        {preview && preview.weekData && (
+        {preview && preview.services && preview.services.length > 0 && (
           <Card className="border-border/50">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base flex items-center gap-2">
                   <RefreshCw className="w-4 h-4 text-primary" />
-                  Current Setlist Preview — {formatDate(preview.targetSunday)}
+                  Current Setlist Preview — Week of Sunday {formatDate(preview.targetSunday)}
                 </CardTitle>
                 <Button
                   data-testid="button-refresh-preview"
@@ -267,61 +286,67 @@ export default function Dashboard() {
                 </Button>
               </div>
             </CardHeader>
-            <CardContent>
-              <div className="grid gap-4 grid-cols-1 md:grid-cols-3">
-                {preview.weekData.sections.map((section) => (
-                  <div
-                    key={section.name}
-                    className="p-4 rounded-lg border border-border/50 bg-muted/20 overflow-hidden"
-                    data-testid={`preview-section-${section.name.replace(/\s+/g, '-').toLowerCase()}`}
-                  >
-                    <h3 className="font-medium text-sm mb-2">{section.name}</h3>
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-3 min-w-0">
-                      <User className="w-3 h-3 shrink-0" />
-                      <span
-                        className="break-all"
-                        data-testid={`text-leader-${section.name.replace(/\s+/g, '-').toLowerCase()}`}
+            <CardContent className="space-y-6">
+              {preview.services.map((service) => (
+                <div
+                  key={service.serviceDate}
+                  data-testid={`preview-service-${service.serviceDate}`}
+                >
+                  <h3 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-2">
+                    <Calendar className="w-3.5 h-3.5" />
+                    {formatServiceDate(service.serviceDate)}
+                  </h3>
+                  <div className="grid gap-4 grid-cols-1 md:grid-cols-3">
+                    {service.sections.map((section) => (
+                      <div
+                        key={section.name}
+                        className="p-4 rounded-lg border border-border/50 bg-muted/20 overflow-hidden"
+                        data-testid={`preview-section-${service.serviceDate}-${section.name.replace(/\s+/g, '-').toLowerCase()}`}
                       >
-                        {section.leaderEmail || 'No leader assigned'}
-                      </span>
-                    </div>
-                    {section.songs.length > 0 ? (
-                      <ul className="space-y-1.5">
-                        {section.songs.map((song, i) => (
-                          <li key={i} className="flex items-start gap-1.5 text-xs">
-                            {song.youtubeUrl ? (
-                              <Link2 className="w-3 h-3 text-green-500 mt-0.5 shrink-0" />
-                            ) : (
-                              <XCircle className="w-3 h-3 text-amber-500 mt-0.5 shrink-0" />
-                            )}
-                            <span className="break-words">{song.title}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="text-xs text-muted-foreground italic">No songs yet</p>
-                    )}
+                        <h4 className="font-medium text-sm mb-2">{section.name}</h4>
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-3 min-w-0">
+                          <User className="w-3 h-3 shrink-0" />
+                          <span
+                            className="break-all"
+                            data-testid={`text-leader-${service.serviceDate}-${section.name.replace(/\s+/g, '-').toLowerCase()}`}
+                          >
+                            {section.leaderEmail || 'No leader assigned'}
+                          </span>
+                        </div>
+                        {section.songs.length > 0 ? (
+                          <ul className="space-y-1.5">
+                            {section.songs.map((song, i) => (
+                              <li key={i} className="flex items-start gap-1.5 text-xs">
+                                {song.youtubeUrl ? (
+                                  <Link2 className="w-3 h-3 text-green-500 mt-0.5 shrink-0" />
+                                ) : (
+                                  <XCircle className="w-3 h-3 text-amber-500 mt-0.5 shrink-0" />
+                                )}
+                                <span className="break-words">{song.title}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-xs text-muted-foreground italic">No songs yet</p>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                ))}
-                {preview.weekData.sections.length === 0 && (
-                  <p className="text-sm text-muted-foreground col-span-3 text-center py-4">
-                    No sections found for this Sunday in the document.
-                  </p>
-                )}
-              </div>
+                </div>
+              ))}
             </CardContent>
           </Card>
         )}
 
-        {preview && !preview.weekData && !previewLoading && (
+        {preview && (!preview.services || preview.services.length === 0) && !previewLoading && (
           <Card className="border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20">
             <CardContent className="py-4">
               <div className="flex items-center gap-3">
                 <AlertTriangle className="w-5 h-5 text-amber-500" />
                 <div>
-                  <p className="text-sm font-medium">No setlist found</p>
+                  <p className="text-sm font-medium">No setlists found</p>
                   <p className="text-xs text-muted-foreground">
-                    Could not find a section for Sunday {formatDate(preview.targetSunday)} in the document.
+                    Could not find any services for the week of Sunday {preview?.targetSunday ? formatDate(preview.targetSunday) : ''} in the document.
                   </p>
                 </div>
               </div>
@@ -344,7 +369,7 @@ export default function Dashboard() {
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-primary" />
-                  Latest Validation — {formatDate(latestRun.targetSunday)}
+                  Latest Validation — Week of Sunday {formatDate(latestRun.targetSunday)}
                 </CardTitle>
                 <Badge variant="outline" className="text-xs">
                   {latestRun.trigger === 'scheduled' ? 'Scheduled' : 'Manual'} — {formatDateTime(latestRun.ranAt)}
@@ -358,29 +383,37 @@ export default function Dashboard() {
                   {latestRun.error}
                 </div>
               ) : (
-                <div className="space-y-4">
-                  <div className="grid gap-3 md:grid-cols-3">
-                    {latestRun.sections.map((section) => (
-                      <div
-                        key={section.sectionName}
-                        className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/30"
-                        data-testid={`validation-section-${section.sectionName.replace(/\s+/g, '-').toLowerCase()}`}
-                      >
-                        <div className="flex items-center gap-2">
-                          {statusIcon(section.status)}
-                          <div>
-                            <p className="text-sm font-medium">{section.sectionName}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {section.leaderEmail || 'No leader'}
-                            </p>
+                <div className="space-y-6">
+                  {latestRun.services.map((service) => (
+                    <div key={service.serviceDate} data-testid={`validation-service-${service.serviceDate}`}>
+                      <h3 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-2">
+                        <Calendar className="w-3.5 h-3.5" />
+                        {formatServiceDate(service.serviceDate)}
+                      </h3>
+                      <div className="grid gap-3 md:grid-cols-3">
+                        {service.sections.map((section) => (
+                          <div
+                            key={section.sectionName}
+                            className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/30"
+                            data-testid={`validation-section-${service.serviceDate}-${section.sectionName.replace(/\s+/g, '-').toLowerCase()}`}
+                          >
+                            <div className="flex items-center gap-2">
+                              {statusIcon(section.status)}
+                              <div>
+                                <p className="text-sm font-medium">{section.sectionName}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {section.leaderEmail || 'No leader'}
+                                </p>
+                              </div>
+                            </div>
+                            <Badge variant={statusBadgeVariant(section.status)} className="text-xs">
+                              {statusLabel(section.status)}
+                            </Badge>
                           </div>
-                        </div>
-                        <Badge variant={statusBadgeVariant(section.status)} className="text-xs">
-                          {statusLabel(section.status)}
-                        </Badge>
+                        ))}
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
 
                   {latestRun.emailsSent.length > 0 && (
                     <div className="border-t border-border/30 pt-3">
@@ -423,9 +456,10 @@ export default function Dashboard() {
             ) : history && history.length > 0 ? (
               <div className="space-y-2">
                 {history.slice(0, 10).map((run) => {
-                  const completeCount = run.sections.filter((s) => s.status === 'complete').length;
-                  const totalSections = run.sections.length;
-                  const allGood = completeCount === totalSections && totalSections > 0;
+                  const totalComplete = run.services.reduce((sum, s) => sum + s.sections.filter((sec) => sec.status === 'complete').length, 0);
+                  const totalSections = run.services.reduce((sum, s) => sum + s.sections.length, 0);
+                  const serviceCount = run.services.length;
+                  const allGood = totalComplete === totalSections && totalSections > 0;
 
                   return (
                     <div
@@ -443,10 +477,11 @@ export default function Dashboard() {
                         )}
                         <div>
                           <p className="text-sm font-medium">
-                            Sunday {formatDate(run.targetSunday)}
+                            Week of Sunday {formatDate(run.targetSunday)}
                           </p>
                           <p className="text-xs text-muted-foreground">
                             {formatDateTime(run.ranAt)} — {run.trigger}
+                            {serviceCount > 0 && ` — ${serviceCount} service${serviceCount > 1 ? 's' : ''}`}
                           </p>
                         </div>
                       </div>
@@ -456,7 +491,8 @@ export default function Dashboard() {
                         ) : (
                           <>
                             <Badge variant={allGood ? 'default' : 'secondary'} className="text-xs">
-                              {completeCount}/{totalSections} ready
+                              {totalComplete}/{totalSections} ready
+                              {serviceCount > 1 && ` across ${serviceCount} services`}
                             </Badge>
                             {run.emailsSent.length > 0 && (
                               <Badge variant="outline" className="text-xs">

@@ -52,10 +52,10 @@ export function validateSections(weekData: WeekData): SectionValidation[] {
 
 export async function sendValidationEmails(
   validations: SectionValidation[],
-  targetSunday: string
+  serviceDate: string
 ): Promise<EmailSent[]> {
   const emailsSent: EmailSent[] = [];
-  const formattedDate = new Date(targetSunday + 'T00:00:00').toLocaleDateString('en-US', {
+  const formattedDate = new Date(serviceDate + 'T00:00:00').toLocaleDateString('en-US', {
     weekday: 'long',
     year: 'numeric',
     month: 'long',
