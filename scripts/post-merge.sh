@@ -2,4 +2,5 @@
 set -e
 
 npm install
-npm run db:push
+
+printf "1\n" | npm run db:push
