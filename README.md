@@ -1,5 +1,7 @@
 # Worship Flow
 
+**Live app:** https://worship-flow-automation.replit.app
+
 Automated setlist validation and email reminder system for church worship teams. Reads a Google Doc containing worship setlists, validates that section leaders have submitted their songs and YouTube links, and sends email reminders when anything is missing.
 
 ## What it does
